@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="オープンキャンパスで制作したWebゲームを紹介するページです。" />
+  <title>みんなのWebゲームギャラリー</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --card: #ffffff;
+      --text: #1f2937;
+      --subtext: #667085;
+      --primary: #4f46e5;
+      --primary-hover: #4338ca;
+      --border: #dbe1ea;
+      --danger: #dc2626;
+      --shadow: 0 10px 30px rgba(31, 41, 55, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Kaku Gothic ProN",
+        "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(79, 70, 229, 0.12), transparent 30%),
+        var(--bg);
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .hero {
+      padding: 64px 20px 42px;
+      text-align: center;
+    }
+
+    .hero__badge {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      color: var(--primary);
+      background: rgba(79, 70, 229, 0.1);
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .hero h1 {
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.4rem);
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+    }
+
+    .hero p {
+      max-width: 680px;
+      margin: 18px auto 0;
+      color: var(--subtext);
+      line-height: 1.8;
+    }
+
+    .container {
+      width: min(1100px, calc(100% - 32px));
+      margin: 0 auto 64px;
+    }
+
+    .panel {
+      padding: 24px;
+      border: 1px solid rgba(219, 225, 234, 0.9);
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.92);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .panel h2 {
+      margin: 0 0 18px;
+      font-size: 1.2rem;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .field--full {
+      grid-column: 1 / -1;
+    }
+
+    label {
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+
+    input,
+    textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      background: #fff;
+      font: inherit;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input:focus,
+    textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.12);
+    }
+
+    textarea {
+      min-height: 90px;
+      resize: vertical;
+    }
+
+    .form-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 16px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 12px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .primary-button {
+      padding: 12px 20px;
+      color: #fff;
+      background: var(--primary);
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .primary-button:hover {
+      background: var(--primary-hover);
+      transform: translateY(-1px);
+    }
+
+    .gallery-header {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 36px 0 18px;
+    }
+
+    .gallery-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+
+    .gallery-header p {
+      margin: 6px 0 0;
+      color: var(--subtext);
+      font-size: 0.95rem;
+    }
+
+    .game-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .game-card {
+      display: flex;
+      min-height: 230px;
+      flex-direction: column;
+      padding: 20px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--card);
+      box-shadow: 0 8px 24px rgba(31, 41, 55, 0.06);
+    }
+
+    .game-card__creator {
+      margin: 0 0 8px;
+      color: var(--primary);
+      font-size: 0.82rem;
+      font-weight: 800;
+    }
+
+    .game-card h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      line-height: 1.4;
+    }
+
+    .game-card__description {
+      flex: 1;
+      margin: 12px 0 20px;
+      color: var(--subtext);
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+    }
+
+    .game-card__actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .play-link {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 15px;
+      border-radius: 10px;
+      color: #fff;
+      background: var(--primary);
+      text-decoration: none;
+      font-weight: 800;
+    }
+
+    .delete-button {
+      padding: 8px 10px;
+      color: var(--danger);
+      background: transparent;
+      font-size: 0.85rem;
+    }
+
+    .empty {
+      grid-column: 1 / -1;
+      padding: 42px 20px;
+      border: 2px dashed var(--border);
+      border-radius: 18px;
+      color: var(--subtext);
+      text-align: center;
+      background: rgba(255, 255, 255, 0.65);
+    }
+
+    .notice {
+      margin-top: 18px;
+      color: var(--subtext);
+      font-size: 0.82rem;
+      line-height: 1.6;
+    }
+
+    footer {
+      padding: 0 20px 30px;
+      color: var(--subtext);
+      text-align: center;
+      font-size: 0.85rem;
+    }
+
+    @media (max-width: 820px) {
+      .game-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 640px) {
+      .hero {
+        padding-top: 44px;
+      }
+
+      .form-grid,
+      .game-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        padding: 18px;
+      }
+
+      .gallery-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <span class="hero__badge">OPEN CAMPUS × GENERATIVE AI</span>
+    <h1>みんなのWebゲームギャラリー</h1>
+    <p>
+      オープンキャンパスで制作したWebゲームを公開しています。
+      気になる作品の「ゲームを遊ぶ」ボタンから、ぜひプレイしてみてください。
+    </p>
+  </header>
+
+  <main class="container">
+    <section class="panel" aria-labelledby="register-title">
+      <h2 id="register-title">ゲームを登録する</h2>
+
+      <form id="gameForm">
+        <div class="form-grid">
+          <div class="field">
+            <label for="title">ゲームタイトル</label>
+            <input id="title" name="title" type="text" maxlength="80" required placeholder="例：AI迷路ゲーム" />
+          </div>
+
+          <div class="field">
+            <label for="creator">制作者名・チーム名</label>
+            <input id="creator" name="creator" type="text" maxlength="50" placeholder="例：チームA" />
+          </div>
+
+          <div class="field field--full">
+            <label for="url">ゲームのURL</label>
+            <input id="url" name="url" type="url" required placeholder="https://example.com/game" />
+          </div>
+
+          <div class="field field--full">
+            <label for="description">ゲームの説明</label>
+            <textarea id="description" name="description" maxlength="240" placeholder="ゲームの内容や遊び方を入力してください。"></textarea>
+          </div>
+        </div>
+
+        <div class="form-actions">
+          <button class="primary-button" type="submit">ゲームを追加</button>
+        </div>
+      </form>
+
+      <p class="notice">
+        ※登録内容は、このページを開いているブラウザ内に保存されます。
+        別のパソコンやスマートフォンには自動で共有されません。
+      </p>
+    </section>
+
+    <section aria-labelledby="gallery-title">
+      <div class="gallery-header">
+        <div>
+          <h2 id="gallery-title">作品一覧</h2>
+          <p id="gameCount">0作品</p>
+        </div>
+      </div>
+
+      <div id="gameGrid" class="game-grid"></div>
+    </section>
+  </main>
+
+  <footer>
+    Web Game Gallery
+  </footer>
+
+  <script>
+    const STORAGE_KEY = "openCampusWebGames";
+    const gameForm = document.getElementById("gameForm");
+    const gameGrid = document.getElementById("gameGrid");
+    const gameCount = document.getElementById("gameCount");
+
+    let games = loadGames();
+
+    function loadGames() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : [];
+      } catch (error) {
+        console.error("保存データの読み込みに失敗しました。", error);
+        return [];
+      }
+    }
+
+    function saveGames() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(games));
+    }
+
+    function createSafeText(value) {
+      return String(value ?? "").trim();
+    }
+
+    function renderGames() {
+      gameGrid.replaceChildren();
+      gameCount.textContent = `${games.length}作品`;
+
+      if (games.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "まだゲームが登録されていません。上のフォームから追加してください。";
+        gameGrid.appendChild(empty);
+        return;
+      }
+
+      games.forEach((game) => {
+        const card = document.createElement("article");
+        card.className = "game-card";
+
+        const creator = document.createElement("p");
+        creator.className = "game-card__creator";
+        creator.textContent = game.creator || "制作者名なし";
+
+        const title = document.createElement("h3");
+        title.textContent = game.title;
+
+        const description = document.createElement("p");
+        description.className = "game-card__description";
+        description.textContent = game.description || "ゲームの説明はありません。";
+
+        const actions = document.createElement("div");
+        actions.className = "game-card__actions";
+
+        const playLink = document.createElement("a");
+        playLink.className = "play-link";
+        playLink.href = game.url;
+        playLink.target = "_blank";
+        playLink.rel = "noopener noreferrer";
+        playLink.textContent = "ゲームを遊ぶ";
+
+        const deleteButton = document.createElement("button");
+        deleteButton.className = "delete-button";
+        deleteButton.type = "button";
+        deleteButton.textContent = "削除";
+        deleteButton.addEventListener("click", () => deleteGame(game.id));
+
+        actions.append(playLink, deleteButton);
+        card.append(creator, title, description, actions);
+        gameGrid.appendChild(card);
+      });
+    }
+
+    function deleteGame(id) {
+      const target = games.find((game) => game.id === id);
+      if (!target) return;
+
+      const confirmed = window.confirm(`「${target.title}」を削除しますか？`);
+      if (!confirmed) return;
+
+      games = games.filter((game) => game.id !== id);
+      saveGames();
+      renderGames();
+    }
+
+    gameForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      const formData = new FormData(gameForm);
+      const title = createSafeText(formData.get("title"));
+      const creator = createSafeText(formData.get("creator"));
+      const url = createSafeText(formData.get("url"));
+      const description = createSafeText(formData.get("description"));
+
+      if (!title || !url) {
+        window.alert("ゲームタイトルとURLを入力してください。");
+        return;
+      }
+
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(url);
+      } catch {
+        window.alert("正しいURLを入力してください。");
+        return;
+      }
+
+      if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+        window.alert("http または https で始まるURLを入力してください。");
+        return;
+      }
+
+      games.unshift({
+        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+        title,
+        creator,
+        url: parsedUrl.href,
+        description
+      });
+
+      saveGames();
+      renderGames();
+      gameForm.reset();
+      document.getElementById("title").focus();
+    });
+
+    renderGames();
+  </script>
+</body>
+</html>

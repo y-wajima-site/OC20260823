@@ -55,6 +55,12 @@
 </head>
 <body class="min-h-screen flex flex-col justify-between pb-6">
 
+    <!-- Notification Toast -->
+    <div id="toast-notification" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-indigo-600 text-white px-4 py-2.5 rounded-xl shadow-2xl font-bold text-xs flex items-center gap-2 border border-indigo-400 opacity-0 transition-opacity duration-300 pointer-events-none">
+        <i data-lucide="bell" class="w-4 h-4"></i>
+        <span id="toast-message">メッセージ</span>
+    </div>
+
     <!-- Password Verification Modal -->
     <div id="password-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden px-4">
         <div class="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-pop">
@@ -106,7 +112,7 @@
             <div class="flex items-center gap-2">
                 <!-- Sync Status Badge -->
                 <span id="sync-status" class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md text-[10px] font-bold flex items-center gap-1">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 同期中
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> オンライン同期中
                 </span>
 
                 <!-- Mode Switching Button -->
@@ -184,7 +190,7 @@
                 <div class="bg-slate-800/90 border border-indigo-500/30 rounded-2xl p-4 shadow-xl">
                     <div class="text-center mb-4 border-b border-slate-700/60 pb-3">
                         <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[11px] font-semibold border border-emerald-500/30">
-                            実験完了！データ送信完了
+                            実験完了！全体集計へデータ送信完了
                         </span>
                         <h2 class="text-xl font-black text-white mt-1">あなたの個人結果</h2>
                         <p class="text-[11px] text-slate-400 mt-0.5">全体集計画面（教師画面）に結果が追加されました</p>
@@ -227,7 +233,7 @@
                         👨‍🏫 教員・全受講生リアルタイム管理画面
                     </span>
                     <button id="demo-data-btn" class="text-[11px] bg-slate-800/80 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 flex items-center gap-1">
-                        <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成
+                        <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成 (20名分)
                     </button>
                 </div>
                 <h2 class="text-xl font-black text-white">受講生全体 意志決定・結果レポート</h2>
@@ -334,7 +340,7 @@
                 </div>
             </div>
 
-            <!-- Danger Action: Clear All Firebase Class Data -->
+            <!-- Danger Action: Clear All Class Data -->
             <div class="pt-2 text-center">
                 <button id="clear-data-btn" class="px-4 py-2 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/50 rounded-xl text-xs font-bold transition">
                     ⚠️ 授業の集計データをすべてリセット
@@ -345,7 +351,7 @@
 
     </main>
 
-    <!-- Firebase Script and Application Logic -->
+    <!-- Firebase Script and Hybrid Synchronization Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -357,15 +363,73 @@
             ? JSON.parse(__firebase_config) 
             : { apiKey: "demo", authDomain: "demo.firebaseapp.com", projectId: "demo" };
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const db = getFirestore(app);
+        let app, auth, db;
+        let isFirebaseAvailable = false;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            isFirebaseAvailable = true;
+        } catch (e) {
+            console.warn("Firebase Init fallback:", e);
+        }
 
         let currentUser = null;
         let globalResultsMap = new Map(); // Global shared synchronization map across all users
         let unsubscribeRealtime = null;
 
-        // Firebase Shared Public Collection Reference (RULE 1 Compliance)
+        // BroadcastChannel API for multi-tab / local network sync fallback
+        const broadcastChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('bandit_experiment_sync') : null;
+
+        if (broadcastChannel) {
+            broadcastChannel.onmessage = (event) => {
+                if (event.data && event.data.type === 'NEW_RESULT') {
+                    const payload = event.data.payload;
+                    if (payload && payload.userId) {
+                        globalResultsMap.set(payload.userId, payload);
+                        saveToLocalStorageMap();
+                        updateTeacherDashboard(Array.from(globalResultsMap.values()));
+                        showToast("他の学生から新しい結果が届きました！");
+                    }
+                } else if (event.data && event.data.type === 'CLEAR_DATA') {
+                    globalResultsMap.clear();
+                    saveToLocalStorageMap();
+                    updateTeacherDashboard([]);
+                }
+            };
+        }
+
+        // Local Storage Persistence Helpers
+        const LOCAL_STORAGE_KEY = 'bandit_experiment_local_results_v2';
+        
+        function loadFromLocalStorageMap() {
+            try {
+                const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    Object.keys(parsed).forEach(k => {
+                        globalResultsMap.set(k, parsed[k]);
+                    });
+                }
+            } catch (e) {
+                console.warn("LocalStorage Load error:", e);
+            }
+        }
+
+        function saveToLocalStorageMap() {
+            try {
+                const obj = {};
+                globalResultsMap.forEach((v, k) => { obj[k] = v; });
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(obj));
+            } catch (e) {
+                console.warn("LocalStorage Save error:", e);
+            }
+        }
+
+        loadFromLocalStorageMap();
+
+        // Firebase Shared Public Collection Reference
         function getResultsCollectionRef() {
             return collection(db, 'artifacts', appId, 'public', 'data', 'results');
         }
@@ -374,8 +438,13 @@
             return doc(db, 'artifacts', appId, 'public', 'data', 'results', uid);
         }
 
-        // Firebase Auth & Mandatory Listener Auto-Start
+        // Firebase Auth & Listener Auto-Start
         async function initAuth() {
+            if (!isFirebaseAvailable) {
+                updateSyncBadge("ローカル同期モード", "amber");
+                return;
+            }
+
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
@@ -383,46 +452,81 @@
                     await signInAnonymously(auth);
                 }
             } catch (err) {
-                console.warn("Auth initialization fallback:", err);
+                console.warn("Auth initialization warning:", err);
+                updateSyncBadge("ローカル同期モード", "amber");
             }
         }
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                // Update sync UI badge
-                const syncBadge = document.getElementById('sync-status');
-                if (syncBadge) {
-                    syncBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> クラウド全同期中`;
+        if (isFirebaseAvailable && auth) {
+            onAuthStateChanged(auth, (user) => {
+                currentUser = user;
+                if (user) {
+                    updateSyncBadge("クラウド同期中", "emerald");
+                    startGlobalDataSync();
+                } else {
+                    updateSyncBadge("ローカル同期モード", "amber");
                 }
-                // Immediately start listening for all users' data across devices
-                startGlobalDataSync();
-            }
-        });
+            });
+        }
 
         initAuth();
 
-        // Start listening to shared cloud storage for all users
+        function updateSyncBadge(text, color) {
+            const syncBadge = document.getElementById('sync-status');
+            if (syncBadge) {
+                if (color === "emerald") {
+                    syncBadge.className = "px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md text-[10px] font-bold flex items-center gap-1";
+                    syncBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> ${text}`;
+                } else {
+                    syncBadge.className = "px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-md text-[10px] font-bold flex items-center gap-1";
+                    syncBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span> ${text}`;
+                }
+            }
+        }
+
+        // Toast Notification System
+        function showToast(msg) {
+            const toast = document.getElementById('toast-notification');
+            const toastMsg = document.getElementById('toast-message');
+            if (!toast || !toastMsg) return;
+
+            toastMsg.textContent = msg;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, 3000);
+        }
+
+        // Start listening to shared cloud storage
         function startGlobalDataSync() {
-            if (!currentUser) return;
+            if (!currentUser || !isFirebaseAvailable) return;
             if (unsubscribeRealtime) unsubscribeRealtime();
 
             try {
                 const resultsCol = getResultsCollectionRef();
 
-                // Listen to any additions or updates from ALL active students in real time
                 unsubscribeRealtime = onSnapshot(resultsCol, (snapshot) => {
+                    let updatedCount = 0;
                     snapshot.forEach(docSnap => {
                         const data = docSnap.data();
                         if (data && data.userId) {
+                            if (!globalResultsMap.has(data.userId)) updatedCount++;
                             globalResultsMap.set(data.userId, data);
                         }
                     });
                     
-                    // Always trigger teacher view refresh if visible
+                    saveToLocalStorageMap();
                     updateTeacherDashboard(Array.from(globalResultsMap.values()));
+
+                    if (updatedCount > 0 && isTeacherView) {
+                        showToast(`${updatedCount}件の新しいデータを受信しました！`);
+                    }
                 }, (error) => {
-                    console.warn("Firestore realtime snapshot error:", error);
+                    console.warn("Firestore realtime snapshot permission or network fallback:", error);
+                    updateSyncBadge("ローカル同期モード", "amber");
                     updateTeacherDashboard(Array.from(globalResultsMap.values()));
                 });
             } catch (e) {
@@ -493,7 +597,6 @@
             }
         });
 
-        // Password Modal Logic
         function openPasswordModal() {
             passwordInput.value = '';
             passwordErrorMsg.classList.add('hidden');
@@ -523,7 +626,6 @@
             }
         });
 
-        // Lock / Logout Button
         lockTeacherBtn.addEventListener('click', () => {
             isTeacherAuthenticated = false;
             switchToStudentView();
@@ -538,7 +640,6 @@
             headerSubtitle.className = "text-[10px] text-amber-400 font-bold";
             lockTeacherBtn.classList.remove('hidden');
             
-            // Force fetch latest cloud data upon entering teacher view
             await forceFetchAllCloudData();
             updateTeacherDashboard(Array.from(globalResultsMap.values()));
         }
@@ -553,9 +654,8 @@
             lockTeacherBtn.classList.add('hidden');
         }
 
-        // Explicit One-Time Fetch to ensure full synchronization
         async function forceFetchAllCloudData() {
-            if (!currentUser) return;
+            if (!currentUser || !isFirebaseAvailable) return;
             try {
                 const resultsCol = getResultsCollectionRef();
                 const snapshot = await getDocs(resultsCol);
@@ -565,6 +665,7 @@
                         globalResultsMap.set(data.userId, data);
                     }
                 });
+                saveToLocalStorageMap();
             } catch (e) {
                 console.warn("Force fetch cloud data error:", e);
             }
@@ -588,7 +689,7 @@
             gameSection.classList.remove('hidden');
 
             renderMachines();
-            lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
         }
 
         function renderMachines() {
@@ -668,7 +769,7 @@
             avgCoinsEl.textContent = (totalCoins / (MAX_PULLS - pullsLeft)).toFixed(1);
 
             renderMachines();
-            lucide.createIcons();
+            if (window.lucide) lucide.createIcons();
 
             if (pullsLeft === 0) {
                 setTimeout(endGame, 400);
@@ -702,14 +803,14 @@
                 commentEl.innerHTML = `<strong>試行錯誤の難しさを体験:</strong> 回数制限の中でどのタイミングで探索をやめてベストな台に絞るか（Explore vs. Exploit）という強化学習の根本課題です。`;
             }
 
-            // Save Result to Firestore and update global store
             await saveResultToCloud();
         }
 
         async function saveResultToCloud() {
-            // Unique per session user identity for clear isolation and tracking
-            const userId = currentUser ? currentUser.uid : `anon_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const userRandomId = `student_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            const userId = currentUser ? currentUser.uid : userRandomId;
             const machinePulls = machineStats.map(m => m.pulls);
+            
             const userPayload = {
                 userId: userId,
                 totalCoins: totalCoins,
@@ -718,18 +819,29 @@
                 timestamp: Date.now()
             };
 
-            // Instantly sync into memory store
+            // 1. Memory & Local Storage Sync
             globalResultsMap.set(userId, userPayload);
-            updateTeacherDashboard(Array.from(globalResultsMap.values()));
+            saveToLocalStorageMap();
 
-            if (!currentUser) return;
-
-            try {
-                const resultRef = getResultDocRef(userId);
-                await setDoc(resultRef, userPayload);
-            } catch (err) {
-                console.warn("Firestore save result error:", err);
+            // 2. BroadcastChannel Multi-tab Sync
+            if (broadcastChannel) {
+                broadcastChannel.postMessage({
+                    type: 'NEW_RESULT',
+                    payload: userPayload
+                });
             }
+
+            // 3. Firestore Sync
+            if (isFirebaseAvailable && currentUser) {
+                try {
+                    const resultRef = getResultDocRef(userId);
+                    await setDoc(resultRef, userPayload);
+                } catch (err) {
+                    console.warn("Firestore save fallback triggered:", err);
+                }
+            }
+
+            updateTeacherDashboard(Array.from(globalResultsMap.values()));
         }
 
         // Render Teacher Dashboard Analytics
@@ -839,7 +951,7 @@
                     plugins: { legend: { display: false } },
                     scales: {
                         x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
-                        y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+                        y: { ticks: { color: '#64748b', font: { size: 10 }, precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
                     }
                 }
             });
@@ -869,32 +981,36 @@
 
                 globalResultsMap.set(fakeUid, mockPayload);
 
-                if (currentUser) {
+                if (isFirebaseAvailable && currentUser) {
                     try {
                         const docRef = getResultDocRef(fakeUid);
                         await setDoc(docRef, mockPayload);
                     } catch (err) {
-                        // Suppress background errors in demo data generation
+                        // Suppress background errors
                     }
                 }
             }
 
+            saveToLocalStorageMap();
             updateTeacherDashboard(Array.from(globalResultsMap.values()));
 
             demoDataBtn.disabled = false;
-            demoDataBtn.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成`;
-            lucide.createIcons();
+            demoDataBtn.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成 (20名分)`;
+            if (window.lucide) lucide.createIcons();
+            showToast("デモ学生20名分のデータを生成・同期しました");
         });
 
         // Clear All Class Data
         clearDataBtn.addEventListener('click', async () => {
-            const confirmed = window.confirm ? confirm("クラス全体の集計データをすべて削除してもよろしいですか？") : true;
-            if (!confirmed) return;
-
             globalResultsMap.clear();
+            saveToLocalStorageMap();
             updateTeacherDashboard([]);
 
-            if (currentUser) {
+            if (broadcastChannel) {
+                broadcastChannel.postMessage({ type: 'CLEAR_DATA' });
+            }
+
+            if (isFirebaseAvailable && currentUser) {
                 try {
                     const resultsCol = getResultsCollectionRef();
                     const snapshot = await getDocs(resultsCol);
@@ -909,6 +1025,8 @@
                     console.warn("Clear data error:", err);
                 }
             }
+
+            showToast("集計データをリセットしました");
         });
 
         resetBtn.addEventListener('click', initGame);

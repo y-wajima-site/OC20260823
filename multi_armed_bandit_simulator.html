@@ -819,7 +819,7 @@
                     const isOptimal = m.id === 2;
                     row.className = isOptimal ? "bg-amber-950/20 font-bold" : "";
                     row.innerHTML = `
-                        <td class="p-2 text-slate-200">${m.name} ${isOptimal ? '👑' : ''}</td>
+                        <td class="p-2 text-slate-200">${m.name} ${isOptimal ? '' : ''}</td>
                         <td class="p-2 text-center text-indigo-300 font-bold">${m.pulls} 回</td>
                         <td class="p-2 text-right text-emerald-400 font-bold">+${m.totalEarned} コイン</td>
                     `;

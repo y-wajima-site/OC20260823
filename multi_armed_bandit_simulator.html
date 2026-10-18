@@ -351,8 +351,8 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, collection, onSnapshot, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Firebase Initialization Guard & Configuration
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bandit-experiment-app';
+        // Firebase Initialization Guard & Global Shared App ID
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bandit-experiment-shared-v1';
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
             : { apiKey: "demo", authDomain: "demo.firebaseapp.com", projectId: "demo" };
@@ -362,9 +362,19 @@
         const db = getFirestore(app);
 
         let currentUser = null;
-        let localDataStore = new Map(); // Local fallback & instant sync store
+        let globalResultsMap = new Map(); // Global shared synchronization map across all users
+        let unsubscribeRealtime = null;
 
-        // Firebase Auth & Listener Auto-Start
+        // Firebase Shared Public Collection Reference (RULE 1 Compliance)
+        function getResultsCollectionRef() {
+            return collection(db, 'artifacts', appId, 'public', 'data', 'results');
+        }
+
+        function getResultDocRef(uid) {
+            return doc(db, 'artifacts', appId, 'public', 'data', 'results', uid);
+        }
+
+        // Firebase Auth & Mandatory Listener Auto-Start
         async function initAuth() {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -380,13 +390,45 @@
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (user) {
-                // Immediately fetch all existing results and start listening to sync data across all students
-                fetchAllClassResults();
-                listenToClassResults();
+                // Update sync UI badge
+                const syncBadge = document.getElementById('sync-status');
+                if (syncBadge) {
+                    syncBadge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> クラウド全同期中`;
+                }
+                // Immediately start listening for all users' data across devices
+                startGlobalDataSync();
             }
         });
 
         initAuth();
+
+        // Start listening to shared cloud storage for all users
+        function startGlobalDataSync() {
+            if (!currentUser) return;
+            if (unsubscribeRealtime) unsubscribeRealtime();
+
+            try {
+                const resultsCol = getResultsCollectionRef();
+
+                // Listen to any additions or updates from ALL active students in real time
+                unsubscribeRealtime = onSnapshot(resultsCol, (snapshot) => {
+                    snapshot.forEach(docSnap => {
+                        const data = docSnap.data();
+                        if (data && data.userId) {
+                            globalResultsMap.set(data.userId, data);
+                        }
+                    });
+                    
+                    // Always trigger teacher view refresh if visible
+                    updateTeacherDashboard(Array.from(globalResultsMap.values()));
+                }, (error) => {
+                    console.warn("Firestore realtime snapshot error:", error);
+                    updateTeacherDashboard(Array.from(globalResultsMap.values()));
+                });
+            } catch (e) {
+                console.warn("Realtime sync setup error:", e);
+            }
+        }
 
         // Game Configurations & Parameters
         const MAX_PULLS = 40;
@@ -487,7 +529,7 @@
             switchToStudentView();
         });
 
-        function switchToTeacherView() {
+        async function switchToTeacherView() {
             isTeacherView = true;
             studentView.classList.add('hidden');
             teacherView.classList.remove('hidden');
@@ -496,8 +538,9 @@
             headerSubtitle.className = "text-[10px] text-amber-400 font-bold";
             lockTeacherBtn.classList.remove('hidden');
             
-            // Force re-render with available store data
-            updateTeacherDashboard(Array.from(localDataStore.values()));
+            // Force fetch latest cloud data upon entering teacher view
+            await forceFetchAllCloudData();
+            updateTeacherDashboard(Array.from(globalResultsMap.values()));
         }
 
         function switchToStudentView() {
@@ -508,6 +551,23 @@
             headerSubtitle.textContent = "学生用プレイ画面";
             headerSubtitle.className = "text-[10px] text-indigo-400 font-bold";
             lockTeacherBtn.classList.add('hidden');
+        }
+
+        // Explicit One-Time Fetch to ensure full synchronization
+        async function forceFetchAllCloudData() {
+            if (!currentUser) return;
+            try {
+                const resultsCol = getResultsCollectionRef();
+                const snapshot = await getDocs(resultsCol);
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    if (data && data.userId) {
+                        globalResultsMap.set(data.userId, data);
+                    }
+                });
+            } catch (e) {
+                console.warn("Force fetch cloud data error:", e);
+            }
         }
 
         // Initialize Student Game State
@@ -642,12 +702,13 @@
                 commentEl.innerHTML = `<strong>試行錯誤の難しさを体験:</strong> 回数制限の中でどのタイミングで探索をやめてベストな台に絞るか（Explore vs. Exploit）という強化学習の根本課題です。`;
             }
 
-            // Save Result to Firestore and update local store
+            // Save Result to Firestore and update global store
             await saveResultToCloud();
         }
 
         async function saveResultToCloud() {
-            const userId = currentUser ? currentUser.uid : `anon_${Date.now()}`;
+            // Unique per session user identity for clear isolation and tracking
+            const userId = currentUser ? currentUser.uid : `anon_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             const machinePulls = machineStats.map(m => m.pulls);
             const userPayload = {
                 userId: userId,
@@ -657,59 +718,17 @@
                 timestamp: Date.now()
             };
 
-            // Update local memory store instantly
-            localDataStore.set(userId, userPayload);
-            updateTeacherDashboard(Array.from(localDataStore.values()));
+            // Instantly sync into memory store
+            globalResultsMap.set(userId, userPayload);
+            updateTeacherDashboard(Array.from(globalResultsMap.values()));
 
             if (!currentUser) return;
 
             try {
-                const resultRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', userId);
+                const resultRef = getResultDocRef(userId);
                 await setDoc(resultRef, userPayload);
             } catch (err) {
-                console.warn("Firestore save fallback:", err);
-            }
-        }
-
-        // Fetch All Initial Class Results from Firestore
-        async function fetchAllClassResults() {
-            if (!currentUser) return;
-            try {
-                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
-                const snapshot = await getDocs(resultsCol);
-                snapshot.forEach(docSnap => {
-                    const data = docSnap.data();
-                    if (data && data.userId) {
-                        localDataStore.set(data.userId, data);
-                    }
-                });
-                updateTeacherDashboard(Array.from(localDataStore.values()));
-            } catch (e) {
-                console.warn("Fetch initial results error:", e);
-            }
-        }
-
-        // Firestore Realtime Listener for Teacher Dashboard (Syncs all students)
-        function listenToClassResults() {
-            if (!currentUser) return;
-            try {
-                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
-
-                onSnapshot(resultsCol, (snapshot) => {
-                    snapshot.forEach(docSnap => {
-                        const data = docSnap.data();
-                        if (data && data.userId) {
-                            localDataStore.set(data.userId, data);
-                        }
-                    });
-                    updateTeacherDashboard(Array.from(localDataStore.values()));
-                }, (error) => {
-                    console.warn("Firestore listener warning:", error);
-                    updateTeacherDashboard(Array.from(localDataStore.values()));
-                });
-            } catch (e) {
-                console.warn("Realtime listener init fallback:", e);
-                updateTeacherDashboard(Array.from(localDataStore.values()));
+                console.warn("Firestore save result error:", err);
             }
         }
 
@@ -831,8 +850,8 @@
             demoDataBtn.disabled = true;
             demoDataBtn.textContent = "生成中...";
 
-            for (let i = 1; i <= 25; i++) {
-                const fakeUid = `demo_student_${i}`;
+            for (let i = 1; i <= 20; i++) {
+                const fakeUid = `demo_student_${Date.now()}_${i}`;
                 const mockCoins = Math.floor(Math.random() * 320) + 120;
                 const mockPayload = {
                     userId: fakeUid,
@@ -848,11 +867,11 @@
                     timestamp: Date.now()
                 };
 
-                localDataStore.set(fakeUid, mockPayload);
+                globalResultsMap.set(fakeUid, mockPayload);
 
                 if (currentUser) {
                     try {
-                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', fakeUid);
+                        const docRef = getResultDocRef(fakeUid);
                         await setDoc(docRef, mockPayload);
                     } catch (err) {
                         // Suppress background errors in demo data generation
@@ -860,7 +879,7 @@
                 }
             }
 
-            updateTeacherDashboard(Array.from(localDataStore.values()));
+            updateTeacherDashboard(Array.from(globalResultsMap.values()));
 
             demoDataBtn.disabled = false;
             demoDataBtn.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成`;
@@ -869,14 +888,15 @@
 
         // Clear All Class Data
         clearDataBtn.addEventListener('click', async () => {
-            if (!confirm("クラス全体の集計データをすべて削除してもよろしいですか？")) return;
+            const confirmed = window.confirm ? confirm("クラス全体の集計データをすべて削除してもよろしいですか？") : true;
+            if (!confirmed) return;
 
-            localDataStore.clear();
+            globalResultsMap.clear();
             updateTeacherDashboard([]);
 
             if (currentUser) {
                 try {
-                    const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
+                    const resultsCol = getResultsCollectionRef();
                     const snapshot = await getDocs(resultsCol);
                     
                     const deletePromises = [];
@@ -889,7 +909,6 @@
                     console.warn("Clear data error:", err);
                 }
             }
-            alert("データをリセットしました。");
         });
 
         resetBtn.addEventListener('click', initGame);

@@ -208,6 +208,27 @@
                         </div>
                     </div>
 
+                    <!-- Personal Machine Choice Breakdown Table -->
+                    <div class="bg-slate-900/80 border border-slate-700/60 rounded-xl p-3 mb-4">
+                        <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                            <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-400"></i> あなたの台別プレイ内訳（選択数・獲得金）
+                        </h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-[11px] text-slate-300">
+                                <thead class="bg-slate-800 text-slate-400 font-semibold">
+                                    <tr>
+                                        <th class="p-2 rounded-l-lg">台</th>
+                                        <th class="p-2 text-center">選択回数（票数）</th>
+                                        <th class="p-2 text-right rounded-r-lg">獲得金額</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="student-breakdown-tbody" class="divide-y divide-slate-800">
+                                    <!-- Dynamic Rows -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
                     <!-- Individual Dynamic Analysis -->
                     <div class="bg-indigo-950/60 border border-indigo-800/50 rounded-xl p-3 mb-4">
                         <p id="psychology-comment" class="text-xs text-indigo-100 leading-relaxed">
@@ -351,7 +372,7 @@
 
     </main>
 
-    <!-- Firebase Script and Hybrid Synchronization Logic -->
+    <!-- Script Logic Updates -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -794,6 +815,23 @@
             const optimalRate = ((bestPulls / MAX_PULLS) * 100).toFixed(0);
             document.getElementById('optimal-choice-rate').textContent = `${optimalRate}%`;
 
+            // Populate Personal Choice & Coin Breakdown Table
+            const tbody = document.getElementById('student-breakdown-tbody');
+            if (tbody) {
+                tbody.innerHTML = '';
+                machineStats.forEach(m => {
+                    const row = document.createElement('tr');
+                    const isOptimal = m.id === 2;
+                    row.className = isOptimal ? "bg-amber-950/20 font-bold" : "";
+                    row.innerHTML = `
+                        <td class="p-2 text-slate-200">${m.name} ${isOptimal ? '👑' : ''}</td>
+                        <td class="p-2 text-center text-indigo-300 font-bold">${m.pulls} 回</td>
+                        <td class="p-2 text-right text-emerald-400 font-bold">+${m.totalEarned} コイン</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+            }
+
             const commentEl = document.getElementById('psychology-comment');
             if (optimalRate >= 50) {
                 commentEl.innerHTML = `<strong>素晴らしい探索・利用バランスです！</strong> 期待値最高の<strong>台 C</strong>を見抜き、大半の試行を集中させることができました。`;
@@ -803,6 +841,7 @@
                 commentEl.innerHTML = `<strong>試行錯誤の難しさを体験:</strong> 回数制限の中でどのタイミングで探索をやめてベストな台に絞るか（Explore vs. Exploit）という強化学習の根本課題です。`;
             }
 
+            if (window.lucide) lucide.createIcons();
             await saveResultToCloud();
         }
 

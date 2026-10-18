@@ -380,7 +380,8 @@
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (user) {
-                // Immediately start listening to sync data across all clients
+                // Immediately fetch all existing results and start listening to sync data across all students
+                fetchAllClassResults();
                 listenToClassResults();
             }
         });
@@ -670,8 +671,27 @@
             }
         }
 
-        // Firestore Realtime Listener for Teacher Dashboard
+        // Fetch All Initial Class Results from Firestore
+        async function fetchAllClassResults() {
+            if (!currentUser) return;
+            try {
+                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
+                const snapshot = await getDocs(resultsCol);
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    if (data && data.userId) {
+                        localDataStore.set(data.userId, data);
+                    }
+                });
+                updateTeacherDashboard(Array.from(localDataStore.values()));
+            } catch (e) {
+                console.warn("Fetch initial results error:", e);
+            }
+        }
+
+        // Firestore Realtime Listener for Teacher Dashboard (Syncs all students)
         function listenToClassResults() {
+            if (!currentUser) return;
             try {
                 const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
 

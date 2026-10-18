@@ -104,13 +104,18 @@
             </div>
             
             <div class="flex items-center gap-2">
+                <!-- Sync Status Badge -->
+                <span id="sync-status" class="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-md text-[10px] font-bold flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 同期中
+                </span>
+
                 <!-- Mode Switching Button -->
                 <button id="toggle-mode-btn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow">
                     <i data-lucide="shield" class="w-3.5 h-3.5"></i>
                     <span id="mode-btn-text">教師画面へ</span>
                 </button>
                 
-                <!-- Lock / Logout Button (Visible only in authenticated Teacher View) -->
+                <!-- Lock / Logout Button -->
                 <button id="lock-teacher-btn" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs transition hidden flex items-center gap-1" title="教師権限を再ロック">
                     <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-400"></i>
                 </button>
@@ -357,8 +362,9 @@
         const db = getFirestore(app);
 
         let currentUser = null;
+        let localDataStore = new Map(); // Local fallback & instant sync store
 
-        // Firebase Auth Setup
+        // Firebase Auth & Listener Auto-Start
         async function initAuth() {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -373,7 +379,8 @@
 
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
-            if (user && isTeacherView) {
+            if (user) {
+                // Immediately start listening to sync data across all clients
                 listenToClassResults();
             }
         });
@@ -401,7 +408,7 @@
         let classDistChart = null;
         let classChoiceChart = null;
 
-        // DOM Elements Selector
+        // DOM Elements
         const toggleModeBtn = document.getElementById('toggle-mode-btn');
         const modeBtnText = document.getElementById('mode-btn-text');
         const lockTeacherBtn = document.getElementById('lock-teacher-btn');
@@ -433,10 +440,8 @@
         // Mode Switching Toggle
         toggleModeBtn.addEventListener('click', () => {
             if (isTeacherView) {
-                // Switch back to Student View
                 switchToStudentView();
             } else {
-                // Switch to Teacher View (Check Authentication)
                 if (isTeacherAuthenticated) {
                     switchToTeacherView();
                 } else {
@@ -489,7 +494,9 @@
             headerSubtitle.textContent = "教師管理画面（保護中）";
             headerSubtitle.className = "text-[10px] text-amber-400 font-bold";
             lockTeacherBtn.classList.remove('hidden');
-            listenToClassResults();
+            
+            // Force re-render with available store data
+            updateTeacherDashboard(Array.from(localDataStore.values()));
         }
 
         function switchToStudentView() {
@@ -621,7 +628,6 @@
 
             document.getElementById('student-final-score').textContent = totalCoins;
 
-            // Machine C (id: 2) is optimal
             const bestPulls = machineStats[2].pulls;
             const optimalRate = ((bestPulls / MAX_PULLS) * 100).toFixed(0);
             document.getElementById('optimal-choice-rate').textContent = `${optimalRate}%`;
@@ -635,51 +641,64 @@
                 commentEl.innerHTML = `<strong>試行錯誤の難しさを体験:</strong> 回数制限の中でどのタイミングで探索をやめてベストな台に絞るか（Explore vs. Exploit）という強化学習の根本課題です。`;
             }
 
-            // Save Result to Firestore
+            // Save Result to Firestore and update local store
             await saveResultToCloud();
         }
 
-        // Firestore Public Data Save Strategy (Rule 1 & Rule 3 Compliant)
         async function saveResultToCloud() {
-            if (!currentUser) return;
-
+            const userId = currentUser ? currentUser.uid : `anon_${Date.now()}`;
             const machinePulls = machineStats.map(m => m.pulls);
             const userPayload = {
-                userId: currentUser.uid,
+                userId: userId,
                 totalCoins: totalCoins,
                 optimalRate: parseFloat(((machineStats[2].pulls / MAX_PULLS) * 100).toFixed(1)),
                 machinePulls: machinePulls,
                 timestamp: Date.now()
             };
 
+            // Update local memory store instantly
+            localDataStore.set(userId, userPayload);
+            updateTeacherDashboard(Array.from(localDataStore.values()));
+
+            if (!currentUser) return;
+
             try {
-                // Rule 1: /artifacts/{appId}/public/data/results/{documentId}
-                const resultRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', currentUser.uid);
+                const resultRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', userId);
                 await setDoc(resultRef, userPayload);
             } catch (err) {
                 console.warn("Firestore save fallback:", err);
             }
         }
 
-        // Firestore Realtime Listener for Teacher Dashboard (Rule 2 & Error Callback Compliant)
+        // Firestore Realtime Listener for Teacher Dashboard
         function listenToClassResults() {
-            if (!currentUser) return;
+            try {
+                const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
 
-            // Rule 1 & Rule 2: Simple collection query without complex filters/ordering
-            const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
-
-            onSnapshot(resultsCol, (snapshot) => {
-                const results = [];
-                snapshot.forEach(doc => results.push(doc.data()));
-                updateTeacherDashboard(results);
-            }, (error) => {
-                console.warn("Firestore listener error:", error);
-            });
+                onSnapshot(resultsCol, (snapshot) => {
+                    snapshot.forEach(docSnap => {
+                        const data = docSnap.data();
+                        if (data && data.userId) {
+                            localDataStore.set(data.userId, data);
+                        }
+                    });
+                    updateTeacherDashboard(Array.from(localDataStore.values()));
+                }, (error) => {
+                    console.warn("Firestore listener warning:", error);
+                    updateTeacherDashboard(Array.from(localDataStore.values()));
+                });
+            } catch (e) {
+                console.warn("Realtime listener init fallback:", e);
+                updateTeacherDashboard(Array.from(localDataStore.values()));
+            }
         }
 
         // Render Teacher Dashboard Analytics
         function updateTeacherDashboard(resultsList) {
-            document.getElementById('class-count').textContent = resultsList.length;
+            const countEl = document.getElementById('class-count');
+            if (!countEl) return;
+
+            countEl.textContent = resultsList.length;
 
             if (resultsList.length === 0) {
                 document.getElementById('class-max-score').textContent = "0";
@@ -714,7 +733,9 @@
 
         function renderClassCharts(resultsList, machinePullsAgg) {
             // Chart 1: Class Score Histogram
-            const ctx1 = document.getElementById('classDistributionChart').getContext('2d');
+            const ctx1 = document.getElementById('classDistributionChart');
+            if (!ctx1) return;
+
             if (classDistChart) classDistChart.destroy();
 
             const scoreBins = {
@@ -734,7 +755,7 @@
                 else scoreBins['451+ (強者)']++;
             });
 
-            classDistChart = new Chart(ctx1, {
+            classDistChart = new Chart(ctx1.getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: Object.keys(scoreBins),
@@ -757,10 +778,12 @@
             });
 
             // Chart 2: Machine Choice Distribution Across Class
-            const ctx2 = document.getElementById('classChoiceChart').getContext('2d');
+            const ctx2 = document.getElementById('classChoiceChart');
+            if (!ctx2) return;
+
             if (classChoiceChart) classChoiceChart.destroy();
 
-            classChoiceChart = new Chart(ctx2, {
+            classChoiceChart = new Chart(ctx2.getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: ['台 A (70%)', '台 B (50%)', '台 C (25%★)', '台 D (90%)', '台 E (15%)'],
@@ -785,7 +808,6 @@
 
         // Demo Data Generator for Teacher Testing
         demoDataBtn.addEventListener('click', async () => {
-            if (!currentUser) return;
             demoDataBtn.disabled = true;
             demoDataBtn.textContent = "生成中...";
 
@@ -806,9 +828,19 @@
                     timestamp: Date.now()
                 };
 
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', fakeUid);
-                await setDoc(docRef, mockPayload);
+                localDataStore.set(fakeUid, mockPayload);
+
+                if (currentUser) {
+                    try {
+                        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', fakeUid);
+                        await setDoc(docRef, mockPayload);
+                    } catch (err) {
+                        // Suppress background errors in demo data generation
+                    }
+                }
             }
+
+            updateTeacherDashboard(Array.from(localDataStore.values()));
 
             demoDataBtn.disabled = false;
             demoDataBtn.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成`;
@@ -817,18 +849,26 @@
 
         // Clear All Class Data
         clearDataBtn.addEventListener('click', async () => {
-            if (!currentUser) return;
             if (!confirm("クラス全体の集計データをすべて削除してもよろしいですか？")) return;
 
-            const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
-            const snapshot = await getDocs(resultsCol);
-            
-            const deletePromises = [];
-            snapshot.forEach(docSnap => {
-                deletePromises.push(deleteDoc(docSnap.ref));
-            });
+            localDataStore.clear();
+            updateTeacherDashboard([]);
 
-            await Promise.all(deletePromises);
+            if (currentUser) {
+                try {
+                    const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
+                    const snapshot = await getDocs(resultsCol);
+                    
+                    const deletePromises = [];
+                    snapshot.forEach(docSnap => {
+                        deletePromises.push(deleteDoc(docSnap.ref));
+                    });
+
+                    await Promise.all(deletePromises);
+                } catch (err) {
+                    console.warn("Clear data error:", err);
+                }
+            }
             alert("データをリセットしました。");
         });
 

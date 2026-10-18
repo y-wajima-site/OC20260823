@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>多腕バンディット 授業用リアルタイムアプリ</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;700;800&display=swap');
+        
+        * {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+
+        @keyframes popIn {
+            0% { transform: scale(0.9); opacity: 0.8; }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        @keyframes coinFloat {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-25px) scale(1.2); opacity: 0; }
+        }
+
+        .animate-pop {
+            animation: popIn 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .coin-popup {
+            animation: coinFloat 0.6s ease-out forwards;
+        }
+
+        .machine-card {
+            touch-action: manipulation;
+            transition: transform 0.1s ease, box-shadow 0.1s ease;
+        }
+
+        .machine-card:active {
+            transform: scale(0.96);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between pb-6">
+
+    <!-- Password Verification Modal -->
+    <div id="password-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden px-4">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-pop">
+            <div class="flex items-center justify-between mb-4">
+                <div class="flex items-center gap-2">
+                    <div class="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-amber-400">
+                        <i data-lucide="lock" class="w-4 h-4"></i>
+                    </div>
+                    <h3 class="text-base font-extrabold text-white">教師用認証</h3>
+                </div>
+                <button id="close-modal-btn" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            
+            <p class="text-xs text-slate-300 mb-4">
+                全受講生の集計データ閲覧・管理画面に入るにはパスワードが必要です。
+            </p>
+
+            <form id="password-form" class="space-y-3">
+                <div>
+                    <input type="password" id="teacher-password-input" placeholder="パスワードを入力" class="w-full px-3 py-2.5 bg-slate-800 border border-slate-700 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500 transition" autocomplete="off" />
+                    <p id="password-error-msg" class="text-[11px] text-rose-400 mt-1 hidden font-semibold">パスワードが正しくありません</p>
+                </div>
+                
+                <div class="flex gap-2 pt-1">
+                    <button type="button" id="cancel-password-btn" class="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold rounded-xl transition">
+                        キャンセル
+                    </button>
+                    <button type="submit" class="w-1/2 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shadow transition">
+                        認証する
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Header & Mode Switcher -->
+    <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 shadow-md">
+        <div class="max-w-xl mx-auto flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <div class="w-8 h-8 rounded-full bg-indigo-600/30 border border-indigo-400/30 flex items-center justify-center text-indigo-400 font-black text-sm">
+                    🎰
+                </div>
+                <div>
+                    <h1 class="text-sm font-extrabold text-white leading-none">バンディット実験</h1>
+                    <span id="header-subtitle" class="text-[10px] text-indigo-400 font-bold">学生用プレイ画面</span>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <!-- Mode Switching Button -->
+                <button id="toggle-mode-btn" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow">
+                    <i data-lucide="shield" class="w-3.5 h-3.5"></i>
+                    <span id="mode-btn-text">教師画面へ</span>
+                </button>
+                
+                <!-- Lock / Logout Button (Visible only in authenticated Teacher View) -->
+                <button id="lock-teacher-btn" class="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs transition hidden flex items-center gap-1" title="教師権限を再ロック">
+                    <i data-lucide="lock" class="w-3.5 h-3.5 text-amber-400"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="max-w-xl mx-auto w-full px-4 pt-4 flex-grow flex flex-col justify-between">
+
+        <!-- ================= STUDENT GAME SECTION ================= -->
+        <div id="student-view" class="space-y-4">
+            
+            <!-- Dynamic Game Section -->
+            <div id="game-section" class="flex flex-col flex-grow justify-between gap-4">
+                
+                <!-- Quick Target Counter & Stat Grid -->
+                <div class="flex items-center justify-between bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
+                    <div>
+                        <span class="text-[10px] text-slate-400 block font-semibold">残り回数</span>
+                        <div class="flex items-baseline gap-1">
+                            <span id="pulls-left" class="text-2xl font-black text-amber-400">40</span>
+                            <span class="text-xs text-slate-500">/ 40回</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-400 block font-semibold">累計獲得コイン</span>
+                        <span id="total-coins" class="text-2xl font-black text-emerald-400">0</span>
+                    </div>
+                </div>
+
+                <!-- Dashboard Stat Grid -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-2.5 text-center relative overflow-hidden">
+                        <span class="text-[10px] text-slate-400 block font-semibold mb-0.5">直前の結果</span>
+                        <span id="last-reward" class="text-lg font-extrabold text-slate-300 leading-none">-</span>
+                        <div id="coin-popup-container" class="absolute inset-0 pointer-events-none flex items-center justify-center"></div>
+                    </div>
+                    <div class="bg-slate-800/60 border border-slate-700/50 rounded-xl p-2.5 text-center">
+                        <span class="text-[10px] text-slate-400 block font-semibold mb-0.5">1回あたりの平均</span>
+                        <span id="avg-coins" class="text-xl font-black text-indigo-400 leading-none">0.0</span>
+                    </div>
+                </div>
+
+                <!-- Instruction Box -->
+                <div class="bg-indigo-950/40 border border-indigo-800/30 rounded-xl p-3 text-center">
+                    <p class="text-xs text-indigo-200">
+                        5つの台から自由に選んでタップ！<br>高配当な「アタリ確率」を探りながらハイスコアを目指そう。
+                    </p>
+                </div>
+
+                <!-- Slot Machines Vertical Stack -->
+                <div id="machines-container" class="space-y-2.5 my-auto">
+                    <!-- JavaScript renders 5 mobile cards here -->
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="w-full bg-slate-800/40 h-1.5 rounded-full overflow-hidden">
+                    <div id="progress-bar" class="bg-indigo-500 h-full transition-all duration-300" style="width: 100%"></div>
+                </div>
+            </div>
+
+            <!-- Student Results Panel -->
+            <div id="results-section" class="hidden space-y-4">
+                
+                <div class="bg-slate-800/90 border border-indigo-500/30 rounded-2xl p-4 shadow-xl">
+                    <div class="text-center mb-4 border-b border-slate-700/60 pb-3">
+                        <span class="px-2.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded-full text-[11px] font-semibold border border-emerald-500/30">
+                            実験完了！データ送信完了
+                        </span>
+                        <h2 class="text-xl font-black text-white mt-1">あなたの個人結果</h2>
+                        <p class="text-[11px] text-slate-400 mt-0.5">全体集計画面（教師画面）に結果が追加されました</p>
+                    </div>
+
+                    <!-- Strategic Metrics Cards -->
+                    <div class="grid grid-cols-2 gap-2 mb-4">
+                        <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                            <span class="text-[10px] text-slate-400 block mb-1">獲得総額</span>
+                            <span id="student-final-score" class="text-2xl font-black text-emerald-400">0</span>
+                        </div>
+                        <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-700/50 text-center">
+                            <span class="text-[10px] text-slate-400 block mb-1">最適台（最高期待値）選択率</span>
+                            <span id="optimal-choice-rate" class="text-2xl font-black text-indigo-400">0%</span>
+                        </div>
+                    </div>
+
+                    <!-- Individual Dynamic Analysis -->
+                    <div class="bg-indigo-950/60 border border-indigo-800/50 rounded-xl p-3 mb-4">
+                        <p id="psychology-comment" class="text-xs text-indigo-100 leading-relaxed">
+                            <!-- Dynamic analysis commentary -->
+                        </p>
+                    </div>
+
+                    <button id="reset-btn" class="w-full py-3 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-extrabold text-sm rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> もう一度個別に挑戦する
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ================= TEACHER DASHBOARD SECTION ================= -->
+        <div id="teacher-view" class="hidden space-y-4">
+            
+            <!-- Teacher Header Banner -->
+            <div class="bg-gradient-to-r from-indigo-900/80 to-purple-900/80 border border-indigo-500/40 rounded-2xl p-4 shadow-xl">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="px-2.5 py-0.5 bg-indigo-500/30 text-indigo-200 rounded-full text-[10px] font-bold border border-indigo-400/30">
+                        👨‍🏫 教員・全受講生リアルタイム管理画面
+                    </span>
+                    <button id="demo-data-btn" class="text-[11px] bg-slate-800/80 hover:bg-slate-700 text-slate-300 px-2.5 py-1 rounded-lg border border-slate-700 flex items-center gap-1">
+                        <i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成
+                    </button>
+                </div>
+                <h2 class="text-xl font-black text-white">受講生全体 意志決定・結果レポート</h2>
+                <p class="text-xs text-indigo-200 mt-1 leading-relaxed">
+                    学生がスマホ等で送信したデータがリアルタイムで集計されます。期待値が高い「台C」を選べたか、確率のトラップにハマったかを比較・解説しましょう。
+                </p>
+            </div>
+
+            <!-- Key Class Indicators (KPIs) -->
+            <div class="grid grid-cols-3 gap-2">
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 text-center">
+                    <span class="text-[10px] text-slate-400 block font-semibold">参加学生数</span>
+                    <span id="class-count" class="text-2xl font-black text-indigo-400">0</span>
+                    <span class="text-[9px] text-slate-500 block">人</span>
+                </div>
+                <div class="bg-slate-800/80 border border-amber-500/40 rounded-xl p-3 text-center bg-amber-950/10">
+                    <span class="text-[10px] text-amber-300 block font-semibold">🏆 最高獲得金額</span>
+                    <span id="class-max-score" class="text-2xl font-black text-amber-400">0</span>
+                    <span class="text-[9px] text-amber-500/80 block">コイン</span>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700/60 rounded-xl p-3 text-center">
+                    <span class="text-[10px] text-slate-400 block font-semibold">平均獲得金額</span>
+                    <span id="class-avg-score" class="text-2xl font-black text-emerald-400">0</span>
+                    <span class="text-[9px] text-slate-500 block">コイン</span>
+                </div>
+            </div>
+
+            <!-- Chart 1: Class Score Distribution Histogram -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4">
+                <h3 class="text-xs font-bold text-slate-200 mb-1 flex items-center gap-1.5">
+                    <i data-lucide="bar-chart-2" class="w-4 h-4 text-emerald-400"></i> 学生全員の獲得金額分布（ヒストグラム）
+                </h3>
+                <p class="text-[11px] text-slate-400 mb-3">誰がリスクを取ってハイスコアを出し、誰が安定重視で平均に収束したかを提示できます。</p>
+                <div class="h-48 w-full bg-slate-900/80 rounded-xl p-2 border border-slate-800">
+                    <canvas id="classDistributionChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: Choice Frequency per Machine -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4">
+                <h3 class="text-xs font-bold text-slate-200 mb-1 flex items-center gap-1.5">
+                    <i data-lucide="pie-chart" class="w-4 h-4 text-indigo-400"></i> 全学生の各台（マシン）選択率割合
+                </h3>
+                <p class="text-[11px] text-slate-400 mb-3">最高期待値の「台C」がどれくらい選ばれたか、安心感の「台D」に偏ったかが一目で判明します。</p>
+                <div class="h-48 w-full bg-slate-900/80 rounded-xl p-2 border border-slate-800">
+                    <canvas id="classChoiceChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Machine Parameters Reveal Table for Class Discussion -->
+            <div class="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-4">
+                <h3 class="text-xs font-bold text-slate-200 mb-2 flex items-center gap-1.5">
+                    <i data-lucide="table" class="w-4 h-4 text-amber-400"></i> 隠されたパラメータ（解説用）
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-[11px] text-slate-300">
+                        <thead class="bg-slate-900/80 text-slate-400 font-semibold">
+                            <tr>
+                                <th class="p-2 rounded-l-lg">台</th>
+                                <th class="p-2">アタリ確率</th>
+                                <th class="p-2">配当範囲</th>
+                                <th class="p-2 text-amber-400 font-bold">1回期待値</th>
+                                <th class="p-2 rounded-r-lg">心理・行動学的特徴</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-800">
+                            <tr>
+                                <td class="p-2 font-bold text-blue-300">台 A</td>
+                                <td class="p-2">70%</td>
+                                <td class="p-2">8〜12</td>
+                                <td class="p-2 font-bold text-amber-400">7.0</td>
+                                <td class="p-2 text-slate-400">標準的・安定的</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 font-bold text-emerald-300">台 B</td>
+                                <td class="p-2">50%</td>
+                                <td class="p-2">16〜24</td>
+                                <td class="p-2 font-bold text-amber-400">10.0</td>
+                                <td class="p-2 text-slate-400">バランス型</td>
+                            </tr>
+                            <tr class="bg-emerald-950/40">
+                                <td class="p-2 font-bold text-amber-300">台 C 👑</td>
+                                <td class="p-2">25%</td>
+                                <td class="p-2">50〜70</td>
+                                <td class="p-2 font-bold text-amber-400">15.0 (最高)</td>
+                                <td class="p-2 text-emerald-300 font-semibold">理論上最強。ただし序盤外れると見落とされる</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 font-bold text-purple-300">台 D</td>
+                                <td class="p-2">90%</td>
+                                <td class="p-2">4〜6</td>
+                                <td class="p-2 font-bold text-amber-400">4.5</td>
+                                <td class="p-2 text-purple-300">「安心感トラップ」。当たるが期待値最低</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2 font-bold text-rose-300">台 E</td>
+                                <td class="p-2">15%</td>
+                                <td class="p-2">10〜20</td>
+                                <td class="p-2 font-bold text-amber-400">2.25</td>
+                                <td class="p-2 text-slate-400">ハズレ台</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Danger Action: Clear All Firebase Class Data -->
+            <div class="pt-2 text-center">
+                <button id="clear-data-btn" class="px-4 py-2 bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/50 rounded-xl text-xs font-bold transition">
+                    ⚠️ 授業の集計データをすべてリセット
+                </button>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- Firebase Script and Application Logic -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Initialization Guard & Configuration
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'bandit-experiment-app';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : { apiKey: "demo", authDomain: "demo.firebaseapp.com", projectId: "demo" };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        let currentUser = null;
+
+        // Firebase Auth Setup
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.warn("Auth initialization fallback:", err);
+            }
+        }
+
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user && isTeacherView) {
+                listenToClassResults();
+            }
+        });
+
+        initAuth();
+
+        // Game Configurations & Parameters
+        const MAX_PULLS = 40;
+        let pullsLeft = MAX_PULLS;
+        let totalCoins = 0;
+        let history = [];
+        let isTeacherView = false;
+        let isTeacherAuthenticated = false;
+        const TEACHER_PASSWORD = "rilakkuma";
+
+        const machinesConfig = [
+            { id: 0, name: "台 A", prob: 0.70, minR: 8,  maxR: 12, bg: "from-blue-600/80 to-indigo-800/80", border: "border-blue-500/40", badge: "bg-blue-500/20 text-blue-300" },
+            { id: 1, name: "台 B", prob: 0.50, minR: 16, maxR: 24, bg: "from-emerald-600/80 to-teal-800/80", border: "border-emerald-500/40", badge: "bg-emerald-500/20 text-emerald-300" },
+            { id: 2, name: "台 C", prob: 0.25, minR: 50, maxR: 70, bg: "from-amber-600/80 to-orange-800/80", border: "border-amber-500/40", badge: "bg-amber-500/20 text-amber-300" },
+            { id: 3, name: "台 D", prob: 0.90, minR: 4,  maxR: 6,  bg: "from-purple-600/80 to-pink-800/80", border: "border-purple-500/40", badge: "bg-purple-500/20 text-purple-300" },
+            { id: 4, name: "台 E", prob: 0.15, minR: 10, maxR: 20, bg: "from-rose-600/80 to-red-800/80", border: "border-rose-500/40", badge: "bg-rose-500/20 text-rose-300" }
+        ];
+
+        let machineStats = [];
+        let classDistChart = null;
+        let classChoiceChart = null;
+
+        // DOM Elements Selector
+        const toggleModeBtn = document.getElementById('toggle-mode-btn');
+        const modeBtnText = document.getElementById('mode-btn-text');
+        const lockTeacherBtn = document.getElementById('lock-teacher-btn');
+        const headerSubtitle = document.getElementById('header-subtitle');
+        const studentView = document.getElementById('student-view');
+        const teacherView = document.getElementById('teacher-view');
+        
+        // Password Modal DOM Elements
+        const passwordModal = document.getElementById('password-modal');
+        const passwordForm = document.getElementById('password-form');
+        const passwordInput = document.getElementById('teacher-password-input');
+        const passwordErrorMsg = document.getElementById('password-error-msg');
+        const closeModalBtn = document.getElementById('close-modal-btn');
+        const cancelPasswordBtn = document.getElementById('cancel-password-btn');
+
+        const pullsLeftEl = document.getElementById('pulls-left');
+        const totalCoinsEl = document.getElementById('total-coins');
+        const lastRewardEl = document.getElementById('last-reward');
+        const avgCoinsEl = document.getElementById('avg-coins');
+        const progressBarEl = document.getElementById('progress-bar');
+        const machinesContainer = document.getElementById('machines-container');
+        const gameSection = document.getElementById('game-section');
+        const resultsSection = document.getElementById('results-section');
+        const popupContainer = document.getElementById('coin-popup-container');
+        const resetBtn = document.getElementById('reset-btn');
+        const demoDataBtn = document.getElementById('demo-data-btn');
+        const clearDataBtn = document.getElementById('clear-data-btn');
+
+        // Mode Switching Toggle
+        toggleModeBtn.addEventListener('click', () => {
+            if (isTeacherView) {
+                // Switch back to Student View
+                switchToStudentView();
+            } else {
+                // Switch to Teacher View (Check Authentication)
+                if (isTeacherAuthenticated) {
+                    switchToTeacherView();
+                } else {
+                    openPasswordModal();
+                }
+            }
+        });
+
+        // Password Modal Logic
+        function openPasswordModal() {
+            passwordInput.value = '';
+            passwordErrorMsg.classList.add('hidden');
+            passwordModal.classList.remove('hidden');
+            setTimeout(() => passwordInput.focus(), 100);
+        }
+
+        function closePasswordModal() {
+            passwordModal.classList.add('hidden');
+        }
+
+        closeModalBtn.addEventListener('click', closePasswordModal);
+        cancelPasswordBtn.addEventListener('click', closePasswordModal);
+
+        passwordForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const inputVal = passwordInput.value.trim();
+
+            if (inputVal === TEACHER_PASSWORD) {
+                isTeacherAuthenticated = true;
+                closePasswordModal();
+                switchToTeacherView();
+            } else {
+                passwordErrorMsg.classList.remove('hidden');
+                passwordInput.value = '';
+                passwordInput.focus();
+            }
+        });
+
+        // Lock / Logout Button
+        lockTeacherBtn.addEventListener('click', () => {
+            isTeacherAuthenticated = false;
+            switchToStudentView();
+        });
+
+        function switchToTeacherView() {
+            isTeacherView = true;
+            studentView.classList.add('hidden');
+            teacherView.classList.remove('hidden');
+            modeBtnText.textContent = "学生プレイ画面へ";
+            headerSubtitle.textContent = "教師管理画面（保護中）";
+            headerSubtitle.className = "text-[10px] text-amber-400 font-bold";
+            lockTeacherBtn.classList.remove('hidden');
+            listenToClassResults();
+        }
+
+        function switchToStudentView() {
+            isTeacherView = false;
+            teacherView.classList.add('hidden');
+            studentView.classList.remove('hidden');
+            modeBtnText.textContent = "教師画面へ";
+            headerSubtitle.textContent = "学生用プレイ画面";
+            headerSubtitle.className = "text-[10px] text-indigo-400 font-bold";
+            lockTeacherBtn.classList.add('hidden');
+        }
+
+        // Initialize Student Game State
+        function initGame() {
+            pullsLeft = MAX_PULLS;
+            totalCoins = 0;
+            history = [];
+            machineStats = machinesConfig.map(m => ({ ...m, pulls: 0, wins: 0, totalEarned: 0 }));
+
+            pullsLeftEl.textContent = pullsLeft;
+            totalCoinsEl.textContent = "0";
+            lastRewardEl.textContent = "-";
+            lastRewardEl.className = "text-lg font-extrabold text-slate-300 leading-none";
+            avgCoinsEl.textContent = "0.0";
+            progressBarEl.style.width = "100%";
+
+            resultsSection.classList.add('hidden');
+            gameSection.classList.remove('hidden');
+
+            renderMachines();
+            lucide.createIcons();
+        }
+
+        function renderMachines() {
+            machinesContainer.innerHTML = '';
+
+            machineStats.forEach((m) => {
+                const card = document.createElement('div');
+                card.className = `machine-card bg-gradient-to-r ${m.bg} border ${m.border} rounded-2xl p-3 shadow-lg flex items-center justify-between cursor-pointer relative overflow-hidden active:brightness-110`;
+                card.onclick = () => pullLever(m.id);
+
+                card.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-11 h-11 bg-slate-900/50 rounded-xl flex items-center justify-center border border-white/10 shadow-inner">
+                            <i data-lucide="dices" class="w-6 h-6 text-white"></i>
+                        </div>
+                        <div>
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-base font-black text-white leading-tight">${m.name}</h3>
+                                <span class="px-2 py-0.5 rounded-md text-[10px] font-bold ${m.badge}">
+                                    ${m.pulls}回試行
+                                </span>
+                            </div>
+                            <span class="text-[11px] text-white/70 block mt-0.5">
+                                タップしてスロットを回す
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex items-center">
+                        <button class="px-4 py-2 bg-white/15 border border-white/20 rounded-xl text-xs font-bold text-white shadow-sm flex items-center gap-1">
+                            PLAY
+                        </button>
+                    </div>
+                `;
+                machinesContainer.appendChild(card);
+            });
+        }
+
+        function pullLever(machineId) {
+            if (pullsLeft <= 0) return;
+
+            const machine = machineStats[machineId];
+            pullsLeft--;
+            machine.pulls++;
+
+            const isWin = Math.random() < machine.prob;
+            let reward = 0;
+
+            if (isWin) {
+                machine.wins++;
+                reward = Math.floor(Math.random() * (machine.maxR - machine.minR + 1)) + machine.minR;
+            }
+
+            machine.totalEarned += reward;
+            totalCoins += reward;
+
+            history.push({
+                pullIndex: MAX_PULLS - pullsLeft,
+                machineId: machineId,
+                reward: reward,
+                cumulativeTotal: totalCoins
+            });
+
+            pullsLeftEl.textContent = pullsLeft;
+            totalCoinsEl.textContent = totalCoins;
+            progressBarEl.style.width = `${(pullsLeft / MAX_PULLS) * 100}%`;
+
+            showRewardPopup(reward);
+
+            if (reward > 0) {
+                lastRewardEl.textContent = `+${reward}`;
+                lastRewardEl.className = "text-lg font-black text-emerald-400 leading-none animate-pop";
+            } else {
+                lastRewardEl.textContent = "0";
+                lastRewardEl.className = "text-lg font-black text-rose-400 leading-none";
+            }
+
+            avgCoinsEl.textContent = (totalCoins / (MAX_PULLS - pullsLeft)).toFixed(1);
+
+            renderMachines();
+            lucide.createIcons();
+
+            if (pullsLeft === 0) {
+                setTimeout(endGame, 400);
+            }
+        }
+
+        function showRewardPopup(reward) {
+            const popup = document.createElement('div');
+            popup.className = `coin-popup text-sm font-black ${reward > 0 ? 'text-emerald-400' : 'text-slate-400'}`;
+            popup.textContent = reward > 0 ? `+${reward}` : 'MISS';
+            popupContainer.appendChild(popup);
+            setTimeout(() => popup.remove(), 600);
+        }
+
+        async function endGame() {
+            gameSection.classList.add('hidden');
+            resultsSection.classList.remove('hidden');
+
+            document.getElementById('student-final-score').textContent = totalCoins;
+
+            // Machine C (id: 2) is optimal
+            const bestPulls = machineStats[2].pulls;
+            const optimalRate = ((bestPulls / MAX_PULLS) * 100).toFixed(0);
+            document.getElementById('optimal-choice-rate').textContent = `${optimalRate}%`;
+
+            const commentEl = document.getElementById('psychology-comment');
+            if (optimalRate >= 50) {
+                commentEl.innerHTML = `<strong>素晴らしい探索・利用バランスです！</strong> 期待値最高の<strong>台 C</strong>を見抜き、大半の試行を集中させることができました。`;
+            } else if (machineStats[3].pulls >= 15) {
+                commentEl.innerHTML = `<strong>安心感のトラップ傾向:</strong> 当たり確率90%の<strong>台 D</strong>を多く選びました。期待値（4.5）は低いものの「外れるリスクを避けたい」という損失回避バイアスが働いた可能性があります。`;
+            } else {
+                commentEl.innerHTML = `<strong>試行錯誤の難しさを体験:</strong> 回数制限の中でどのタイミングで探索をやめてベストな台に絞るか（Explore vs. Exploit）という強化学習の根本課題です。`;
+            }
+
+            // Save Result to Firestore
+            await saveResultToCloud();
+        }
+
+        // Firestore Public Data Save Strategy (Rule 1 & Rule 3 Compliant)
+        async function saveResultToCloud() {
+            if (!currentUser) return;
+
+            const machinePulls = machineStats.map(m => m.pulls);
+            const userPayload = {
+                userId: currentUser.uid,
+                totalCoins: totalCoins,
+                optimalRate: parseFloat(((machineStats[2].pulls / MAX_PULLS) * 100).toFixed(1)),
+                machinePulls: machinePulls,
+                timestamp: Date.now()
+            };
+
+            try {
+                // Rule 1: /artifacts/{appId}/public/data/results/{documentId}
+                const resultRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', currentUser.uid);
+                await setDoc(resultRef, userPayload);
+            } catch (err) {
+                console.warn("Firestore save fallback:", err);
+            }
+        }
+
+        // Firestore Realtime Listener for Teacher Dashboard (Rule 2 & Error Callback Compliant)
+        function listenToClassResults() {
+            if (!currentUser) return;
+
+            // Rule 1 & Rule 2: Simple collection query without complex filters/ordering
+            const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
+
+            onSnapshot(resultsCol, (snapshot) => {
+                const results = [];
+                snapshot.forEach(doc => results.push(doc.data()));
+                updateTeacherDashboard(results);
+            }, (error) => {
+                console.warn("Firestore listener error:", error);
+            });
+        }
+
+        // Render Teacher Dashboard Analytics
+        function updateTeacherDashboard(resultsList) {
+            document.getElementById('class-count').textContent = resultsList.length;
+
+            if (resultsList.length === 0) {
+                document.getElementById('class-max-score').textContent = "0";
+                document.getElementById('class-avg-score').textContent = "0";
+                renderClassCharts([], [0, 0, 0, 0, 0]);
+                return;
+            }
+
+            let maxScore = 0;
+            let sumScore = 0;
+            const machinePullsAgg = [0, 0, 0, 0, 0];
+
+            resultsList.forEach(r => {
+                const score = r.totalCoins || 0;
+                if (score > maxScore) maxScore = score;
+                sumScore += score;
+
+                if (Array.isArray(r.machinePulls)) {
+                    r.machinePulls.forEach((pulls, idx) => {
+                        if (machinePullsAgg[idx] !== undefined) {
+                            machinePullsAgg[idx] += pulls;
+                        }
+                    });
+                }
+            });
+
+            document.getElementById('class-max-score').textContent = maxScore;
+            document.getElementById('class-avg-score').textContent = (sumScore / resultsList.length).toFixed(1);
+
+            renderClassCharts(resultsList, machinePullsAgg);
+        }
+
+        function renderClassCharts(resultsList, machinePullsAgg) {
+            // Chart 1: Class Score Histogram
+            const ctx1 = document.getElementById('classDistributionChart').getContext('2d');
+            if (classDistChart) classDistChart.destroy();
+
+            const scoreBins = {
+                '〜150': 0,
+                '151〜250': 0,
+                '251〜350': 0,
+                '351〜450': 0,
+                '451+ (強者)': 0
+            };
+
+            resultsList.forEach(r => {
+                const s = r.totalCoins || 0;
+                if (s <= 150) scoreBins['〜150']++;
+                else if (s <= 250) scoreBins['151〜250']++;
+                else if (s <= 350) scoreBins['251〜350']++;
+                else if (s <= 450) scoreBins['351〜450']++;
+                else scoreBins['451+ (強者)']++;
+            });
+
+            classDistChart = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(scoreBins),
+                    datasets: [{
+                        label: '人数',
+                        data: Object.values(scoreBins),
+                        backgroundColor: '#10b981',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
+                        y: { ticks: { color: '#64748b', font: { size: 10 }, precision: 0 }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+                    }
+                }
+            });
+
+            // Chart 2: Machine Choice Distribution Across Class
+            const ctx2 = document.getElementById('classChoiceChart').getContext('2d');
+            if (classChoiceChart) classChoiceChart.destroy();
+
+            classChoiceChart = new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: ['台 A (70%)', '台 B (50%)', '台 C (25%★)', '台 D (90%)', '台 E (15%)'],
+                    datasets: [{
+                        label: '選択総回数',
+                        data: machinePullsAgg,
+                        backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#a855f7', '#f43f5e'],
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', font: { size: 10 } }, grid: { display: false } },
+                        y: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Demo Data Generator for Teacher Testing
+        demoDataBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            demoDataBtn.disabled = true;
+            demoDataBtn.textContent = "生成中...";
+
+            for (let i = 1; i <= 25; i++) {
+                const fakeUid = `demo_student_${i}`;
+                const mockCoins = Math.floor(Math.random() * 320) + 120;
+                const mockPayload = {
+                    userId: fakeUid,
+                    totalCoins: mockCoins,
+                    optimalRate: Math.floor(Math.random() * 80),
+                    machinePulls: [
+                        Math.floor(Math.random() * 10),
+                        Math.floor(Math.random() * 10),
+                        Math.floor(Math.random() * 20),
+                        Math.floor(Math.random() * 15),
+                        Math.floor(Math.random() * 5)
+                    ],
+                    timestamp: Date.now()
+                };
+
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'results', fakeUid);
+                await setDoc(docRef, mockPayload);
+            }
+
+            demoDataBtn.disabled = false;
+            demoDataBtn.innerHTML = `<i data-lucide="sparkles" class="w-3 h-3 text-amber-400"></i> デモ用データ生成`;
+            lucide.createIcons();
+        });
+
+        // Clear All Class Data
+        clearDataBtn.addEventListener('click', async () => {
+            if (!currentUser) return;
+            if (!confirm("クラス全体の集計データをすべて削除してもよろしいですか？")) return;
+
+            const resultsCol = collection(db, 'artifacts', appId, 'public', 'data', 'results');
+            const snapshot = await getDocs(resultsCol);
+            
+            const deletePromises = [];
+            snapshot.forEach(docSnap => {
+                deletePromises.push(deleteDoc(docSnap.ref));
+            });
+
+            await Promise.all(deletePromises);
+            alert("データをリセットしました。");
+        });
+
+        resetBtn.addEventListener('click', initGame);
+
+        window.onload = function() {
+            initGame();
+        };
+    </script>
+</body>
+</html>
